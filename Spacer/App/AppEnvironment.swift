@@ -43,7 +43,8 @@ final class AppModel {
     func presentOnboardingIfNeeded() async {
         let active = await entitlements.refresh()
         guard active == false else { return }
-        let granted = await paywalls.present(placementId: "onboarding")
-        if granted { await entitlements.refresh() }
+        _ = await paywalls.present(placementId: "onboarding")
+        // The user may have subscribed on the onboarding paywall (Full or Observer).
+        await entitlements.refresh()
     }
 }

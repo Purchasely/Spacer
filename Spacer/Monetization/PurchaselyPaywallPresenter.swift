@@ -41,9 +41,12 @@ final class PurchaselyPaywallPresenter: PaywallPresenting {
                 .onDismissed { outcome in
                     // SDK callbacks can fire off-main; hop before touching UI/state.
                     Task { @MainActor in
+                        // onDismissed MUST always fire. A missing "onDismissed" line for a
+                        // paywall you opened is the user-switch-dismiss-callback freeze
+                        // (the continuation below never resumes → the action chain hangs).
+                        Self.logOutcome(outcome, placement: placementId)
                         let granted = outcome.purchaseResult == .purchased
                             || outcome.purchaseResult == .restored
-                        print("[Spacer] Paywall '\(placementId)' dismissed — granted: \(granted)")
                         box.resume(granted)
                     }
                 }
@@ -51,10 +54,14 @@ final class PurchaselyPaywallPresenter: PaywallPresenting {
                 .preload { presentation, error in
                     Task { @MainActor [weak self] in
                         guard let presentation else {
-                            print("[Spacer] Paywall preload failed for '\(placementId)': \(error?.localizedDescription ?? "unknown")")
+                            // Pre-display error: error != nil and there is NO closeReason —
+                            // onDismissed does NOT fire here (error / closeReason are mutually
+                            // exclusive). This is the "erreur pré-affichage" case.
+                            print("[Spacer] Paywall '\(placementId)' preload FAILED — error: \(error?.localizedDescription ?? "unknown"), closeReason: n/a (pre-display); onDismissed will NOT fire")
                             box.resume(false)
                             return
                         }
+                        print("[Spacer] Paywall '\(placementId)' loaded — type: \(Self.describe(presentation.type)), isFlow: \(presentation.isFlow)")
                         switch presentation.type {
                         case .normal, .fallback:
                             // Displayed — the result resolves in onDismissed above.
@@ -92,6 +99,71 @@ final class PurchaselyPaywallPresenter: PaywallPresenting {
             top = presented
         }
         return top
+    }
+
+    // MARK: - Outcome diagnostics
+
+    /// Logs every dismissal-outcome field and the canonical test case it matches, so the
+    /// console proves which path fired. Reference matrix:
+    ///  • Purchase          → purchaseResult PURCHASED, plan != nil, closeReason PROGRAMMATIC
+    ///  • Close (X) button   → closeReason BUTTON, purchaseResult NONE
+    ///  • System back / swipe → closeReason INTERACTIVE_DISMISS, purchaseResult NONE
+    ///  • Restore            → purchaseResult RESTORED, plan != nil
+    ///  • Pre-display error   → logged in preload (error != nil, no closeReason; onDismissed not called)
+    private static func logOutcome(_ outcome: PLYPresentationOutcome, placement: String) {
+        let plan = outcome.plan
+        print("[Spacer] onDismissed '\(placement)' — purchaseResult: \(describe(outcome.purchaseResult)), "
+            + "plan: \(plan?.vendorId ?? "nil") [\(plan?.appleProductId ?? "nil")], "
+            + "closeReason: \(describe(outcome.closeReason)), "
+            + "error: \(outcome.error?.localizedDescription ?? "nil")")
+        print("[Spacer] → case: \(classify(outcome))")
+    }
+
+    private static func classify(_ o: PLYPresentationOutcome) -> String {
+        switch o.purchaseResult {
+        case .purchased: return "PURCHASE (expect plan != nil + closeReason PROGRAMMATIC)"
+        case .restored:  return "RESTORE (expect plan != nil)"
+        case .cancelled: return "purchase CANCELLED"
+        case .none:
+            switch o.closeReason {
+            case .button:             return "CLOSE via X button"
+            case .interactiveDismiss: return "SYSTEM BACK / swipe-to-dismiss"
+            case .programmatic:       return "programmatic close (no purchase)"
+            case .none:               return "dismissed — no purchase, no reason"
+            @unknown default:         return "unknown closeReason"
+            }
+        @unknown default: return "unknown purchaseResult"
+        }
+    }
+
+    private static func describe(_ r: PLYPurchaseResult) -> String {
+        switch r {
+        case .purchased: "PURCHASED"
+        case .restored:  "RESTORED"
+        case .cancelled: "CANCELLED"
+        case .none:      "NONE"
+        @unknown default: "unknown"
+        }
+    }
+
+    private static func describe(_ r: PLYCloseReason) -> String {
+        switch r {
+        case .button:             "BUTTON"
+        case .interactiveDismiss: "INTERACTIVE_DISMISS"
+        case .programmatic:       "PROGRAMMATIC"
+        case .none:               "NONE"
+        @unknown default:         "unknown"
+        }
+    }
+
+    private static func describe(_ t: PLYPresentationType) -> String {
+        switch t {
+        case .normal:      "NORMAL"
+        case .fallback:    "FALLBACK"
+        case .deactivated: "DEACTIVATED"
+        case .client:      "CLIENT"
+        @unknown default:  "unknown"
+        }
     }
 }
 

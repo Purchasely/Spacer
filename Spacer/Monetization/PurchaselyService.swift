@@ -28,35 +28,82 @@ enum PurchaselyService {
             return
         }
 
+        // Mode is fixed for this launch (persisted; a change needs a relaunch).
+        let mode = AppSettings.runningMode
+
         Purchasely
             .apiKey(apiKey)
-            .runningMode(.full)            // REQUIRED for purchase handling — v6 default is .observer
+            .runningMode(mode == .observer ? .observer : .full)  // v6 default is .observer
             .storekitSettings(.storeKit2)  // StoreKit 2 (iOS 15+)
             .logLevel(.debug)              // switch to .warn / .error before release
             .start { error in
                 if let error {
                     print("[Spacer] Purchasely start failed: \(error.localizedDescription)")
                 } else {
-                    print("[Spacer] Purchasely SDK initialized")
+                    print("[Spacer] Purchasely SDK initialized (\(mode.rawValue) mode)")
                 }
             }
+
+        // In Observer mode the APP runs purchases; intercept Buy/Restore and drive
+        // StoreKit. In Full mode no interceptor is needed — the SDK runs purchases.
+        if mode == .observer {
+            registerObserverInterceptors()
+        }
+    }
+
+    /// Observer-mode interceptors: run the StoreKit flow, `synchronize()` to upload the
+    /// receipt, return the result, then dismiss the paywall AFTER the interceptor
+    /// resolves (calling closeAllScreens inside the closure races the SDK).
+    private static func registerObserverInterceptors() {
+        Purchasely.interceptAction(.purchase) { _, params in
+            guard let productId = params?.plan?.appleProductId else {
+                print("[Spacer] Observer purchase: plan has no Apple product id")
+                return .notHandled
+            }
+            switch await StoreKitPurchaser.purchase(productId: productId) {
+            case .purchased:
+                await synchronize()
+                Task { @MainActor in Purchasely.closeAllScreens() }
+                return .success
+            case .cancelledOrPending:
+                return .notHandled   // keep the paywall up so the user can retry
+            case .failed:
+                return .failed
+            }
+        }
+
+        Purchasely.interceptAction(.restore) { _, _ in
+            let restored = await StoreKitPurchaser.restore()
+            await synchronize()
+            Task { @MainActor in Purchasely.closeAllScreens() }
+            return restored ? .success : .failed
+        }
     }
 
     /// Restores the user's previous purchases (e.g. after a reinstall or on a new
     /// device). In Full mode the SDK validates restored transactions itself.
     /// Returns `true` when the restore completed without error.
     static func restorePurchases() async -> Bool {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            Purchasely.restoreAllProducts(
-                success: {
-                    print("[Spacer] Restore completed")
-                    continuation.resume(returning: true)
-                },
-                failure: { error in
-                    print("[Spacer] Restore failed: \(error.localizedDescription)")
-                    continuation.resume(returning: false)
-                }
-            )
+        // restoreAllProducts is a Full-mode API (the SDK does the billing). In Observer
+        // mode the SDK isn't doing billing, so restore via StoreKit, then synchronize.
+        switch AppSettings.runningMode {
+        case .observer:
+            let restored = await StoreKitPurchaser.restore()
+            await synchronize()
+            return restored
+        case .full:
+            return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                Purchasely.restoreAllProducts(
+                    success: {
+                        print("[Spacer] Restore completed")
+                        continuation.resume(returning: true)
+                    },
+                    failure: { error in
+                        print("[Spacer] Restore failed: \(error.localizedDescription)")
+                        continuation.resume(returning: false)
+                    }
+                )
+            }
         }
     }
 

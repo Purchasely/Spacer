@@ -6,7 +6,7 @@ and a recent picture feed — with a premium tier monetized through **Purchasely
 - **Platform:** iOS 17+, iPhone-only, SwiftUI, dark-mode-first
 - **Language:** Swift 6 (strict concurrency, default actor isolation = MainActor)
 - **Data:** NASA Open APIs (APOD) + SwiftData for favorites
-- **Monetization:** Purchasely iOS SDK `6.0.0-rc.1` (Full mode, StoreKit 2)
+- **Monetization:** Purchasely iOS SDK `6.0.0-rc.1` (Full or Observer mode, StoreKit 2)
 
 ## Features
 
@@ -25,16 +25,22 @@ rest of the app never imports Purchasely directly.
 
 | Concern | Where | Notes |
 |---------|-------|-------|
-| SDK lifecycle | `PurchaselyService` | `start()` in Full mode + StoreKit 2; `restorePurchases()`; `userSubscriptions` / `synchronize` helpers |
-| Paywall display | `PurchaselyPaywallPresenter` | v6 `PLYPresentationBuilder` → `preload` → type-guarded `display`; handles `normal`/`fallback`/`deactivated`/`client` |
+| SDK lifecycle | `PurchaselyService` | `start()` with the persisted mode; `restorePurchases()`; `userSubscriptions` / `synchronize` helpers; Observer-mode purchase/restore interceptors |
+| Running mode | `AppSettings` | Full or Observer, persisted; chosen via a Profile toggle (applies on relaunch — the SDK reads the mode once at init) |
+| Observer billing | `StoreKitPurchaser` | StoreKit 2 buy + restore used only in Observer mode (the app finishes the transaction; `synchronize()` uploads the receipt) |
+| Paywall display | `PurchaselyPaywallPresenter` | v6 `PLYPresentationBuilder` → `preload` → type-guarded `display`; handles `normal`/`fallback`/`deactivated`/`client`; logs the full dismissal outcome (purchaseResult / plan / closeReason / error) |
 | Entitlement state | `EntitlementProvider` | Single source of truth for gating; synced from validated subscription state |
-| Gating | `FeatureGateCoordinator` / `FeatureGate` | Every gated tap flows through `attempt(_:action:)` |
+| Gating | `FeatureGateCoordinator` / `FeatureGate` | Every gated tap flows through `attempt(_:action:)`; re-checks entitlements after the paywall closes |
 
-**Running mode:** Full — Purchasely owns and validates the purchase flow.
+**Running mode:** Full (Purchasely owns + validates purchases) or Observer (the app
+runs StoreKit purchases and Purchasely observes). Toggle it in Profile; it applies on
+the next launch.
 
 **Entitlement sync** refreshes from `Purchasely.userSubscriptions` on launch, on
-foreground (after `synchronize()`), after a paywall purchase, and after a restore.
-A failed/unknown check never downgrades a subscriber.
+foreground, after a paywall closes, and after a restore. In Observer mode foreground
+also calls `synchronize()` first; in Full mode it does not (Purchasely keeps state
+fresh server-side, and a redundant `synchronize()` would emit a spurious
+`IN_APP_RESTORED`). A failed/unknown check never downgrades a subscriber.
 
 **Onboarding paywall:** on launch, if the subscription check definitively returns
 no active subscription, the app presents the `"onboarding"` placement. Gated

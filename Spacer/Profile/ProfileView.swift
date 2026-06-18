@@ -21,6 +21,8 @@ struct ProfileView: View {
 
     @State private var isRestoring = false
     @State private var restoreAlert: RestoreAlert?
+    @State private var observerMode = AppSettings.runningMode == .observer
+    @State private var showRestartAlert = false
 
     private let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private let privacyURL = URL(string: "https://api.nasa.gov")!
@@ -31,6 +33,7 @@ struct ProfileView: View {
                 statusSection
                 favoritesSection
                 notificationsSection
+                purchaseModeSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -128,6 +131,28 @@ struct ProfileView: View {
                 }
                 .listRowBackground(AppColor.bgRaised)
             }
+        }
+    }
+
+    private var purchaseModeSection: some View {
+        Section {
+            Toggle("Observer mode", isOn: $observerMode)
+                .tint(AppColor.accent)
+                .onChange(of: observerMode) { _, isOn in
+                    AppSettings.runningMode = isOn ? .observer : .full
+                    showRestartAlert = true
+                }
+                .alert("Restart required", isPresented: $showRestartAlert) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("The running mode changes the next time you launch the app.")
+                }
+                .listRowBackground(AppColor.bgRaised)
+        } header: {
+            Text("Purchase mode")
+        } footer: {
+            Text("Full: Purchasely runs and validates purchases. Observer: the app runs purchases via StoreKit and Purchasely observes. Restart to apply.")
+                .font(AppFont.caption)
         }
     }
 

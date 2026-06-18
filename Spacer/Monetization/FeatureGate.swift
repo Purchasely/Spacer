@@ -76,11 +76,12 @@ final class FeatureGateCoordinator {
             action.perform()
             return
         }
-        let granted = await presenter.present(gate)
-        if granted {
-            // Reflect the just-completed purchase/restore in the source of truth
-            // so the whole app unlocks, not just this one action.
-            await entitlements.refresh()
+        _ = await presenter.present(gate)
+        // Re-check after the paywall closes instead of trusting the presenter's result:
+        // in Observer mode the app runs the purchase, so the SDK's dismissal outcome
+        // doesn't report it — the synced entitlement (via synchronize) is the truth.
+        await entitlements.refresh()
+        if entitlements.isUnlocked(gate) {
             action.perform()
         } else {
             action.rollback()

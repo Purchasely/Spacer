@@ -27,10 +27,16 @@ struct RootTabView: View {
         .tint(AppColor.accent)
         .task { await app.presentOnboardingIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
-            // On foreground, pull any background renewals / cancellations, then re-check.
             guard phase == .active else { return }
             Task {
-                await PurchaselyService.synchronize()
+                // Observer mode must drive synchronize() itself (no server-side webhooks).
+                // Full mode keeps state fresh server-side, and synchronize() there re-validates
+                // the active receipt — emitting a spurious IN_APP_RESTORED on every foreground
+                // (pollutes restore analytics / integrations). So in Full mode just read
+                // userSubscriptions via refresh().
+                if AppSettings.runningMode == .observer {
+                    await PurchaselyService.synchronize()
+                }
                 await app.entitlements.refresh()
             }
         }
