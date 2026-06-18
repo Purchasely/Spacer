@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Base Info.plist. Xcode merges this with the auto-generated keys
+  (GENERATE_INFOPLIST_FILE = YES). Only custom keys live here.
+  NASA_API_KEY is substituted from the xcconfig build setting at build time.
+-->
+<plist version="1.0">
+<dict>
+	<key>NASA_API_KEY</key>
+	<string>$(NASA_API_KEY)</string>
+	<key>PURCHASELY_API_KEY</key>
+	<string>$(PURCHASELY_API_KEY)</string>
+</dict>
+</plist>
